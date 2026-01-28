@@ -156,14 +156,17 @@ async def chat_completion(
         client = anthropic.AsyncAnthropic(api_key=api_key)
         system_prompt, rest = _extract_system_prompt(messages)
         anthropic_tools = _anthropic_tools(tools)
-        response = await client.messages.create(
-            model=model,
-            system=system_prompt or None,
-            messages=rest,
-            tools=anthropic_tools or None,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": rest,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if system_prompt:
+            kwargs["system"] = system_prompt
+        if anthropic_tools:
+            kwargs["tools"] = anthropic_tools
+        response = await client.messages.create(**kwargs)
         text_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
         for block in response.content or []:
