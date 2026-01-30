@@ -634,7 +634,7 @@ async def _run_server(dsn: str) -> None:
 
     server = Server("hexis-mcp")
 
-    client = await CognitiveMemory.connect(dsn)
+    client = await CognitiveMemory.create(dsn)
 
     @server.list_tools()
     async def list_tools():

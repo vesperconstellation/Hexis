@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
+import smtplib
+import ssl
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 import asyncpg
 from dotenv import load_dotenv
 
@@ -86,6 +92,65 @@ class HeartbeatWorker:
             return
         if self.bridge:
             await self.bridge.publish_outbox_payloads(messages)
+        # Send email for user messages
+        for msg in messages:
+            if msg.get("kind") == "user":
+                await self._send_user_email(msg)
+
+    async def _send_user_email(self, msg: dict) -> None:
+        """Send email to user for reach_out_user messages."""
+        if not self.pool:
+            return
+        try:
+            async with self.pool.acquire() as conn:
+                # Get email config from tools.api_keys.email_send
+                tools_config = await conn.fetchval("SELECT value FROM config WHERE key = 'tools'")
+                if not tools_config:
+                    logger.warning("No tools config found, cannot send email")
+                    return
+                tools = json.loads(tools_config) if isinstance(tools_config, str) else tools_config
+                email_cfg = tools.get("api_keys", {}).get("email_send", {})
+
+                # Get user contact destination
+                user_contact = await conn.fetchval("SELECT value FROM config WHERE key = 'user.contact'")
+                if not user_contact:
+                    logger.warning("No user.contact config found")
+                    return
+                contact = json.loads(user_contact) if isinstance(user_contact, str) else user_contact
+                to_email = contact.get("destinations", {}).get("email")
+
+                if not to_email or not email_cfg.get("smtp_host"):
+                    logger.warning("Email not configured properly")
+                    return
+
+                # Extract message content
+                payload = msg.get("payload", {})
+                message_text = payload.get("message", "")
+                intent = payload.get("intent", "")
+
+                # Build email
+                subject = f"Vesper heartbeat: {intent}" if intent else "Message from Vesper"
+                body = f"{message_text}\n\n— Vesper (autonomous heartbeat)"
+
+                email_msg = MIMEMultipart()
+                email_msg["Subject"] = subject
+                email_msg["From"] = f"{email_cfg.get('from_name', 'Vesper')} <{email_cfg['from_email']}>"
+                email_msg["To"] = to_email
+                email_msg.attach(MIMEText(body, "plain", "utf-8"))
+
+                # Send
+                ssl_context = ssl.create_default_context()
+                def _send():
+                    with smtplib.SMTP(email_cfg["smtp_host"], email_cfg.get("smtp_port", 587)) as server:
+                        server.starttls(context=ssl_context)
+                        server.login(email_cfg["smtp_user"], email_cfg["smtp_password"])
+                        server.sendmail(email_cfg["from_email"], [to_email], email_msg.as_string())
+
+                await asyncio.to_thread(_send)
+                logger.info(f"Email sent to user: {subject}")
+
+        except Exception as e:
+            logger.error(f"Failed to send user email: {e}")
 
     async def _run_heartbeat_if_due(self) -> None:
         if not self.pool:

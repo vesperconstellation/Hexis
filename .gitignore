@@ -63,3 +63,12 @@ logs/
 # Misc
 .cache/
 .tmp/
+
+# MCP config (may contain credentials)
+.mcp.json
+
+# Claude Code settings
+.claude/
+
+# Instance-specific overrides
+docker-compose.override.yml

@@ -11,6 +11,6 @@ COPY apps /app/apps
 COPY core /app/core
 COPY services /app/services
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[anthropic]"
 
 CMD ["hexis-worker"]
